@@ -1,8 +1,7 @@
 # Strategy-Lab-2
 
 
-"""
-Strategy Lab #2 — Mean Reversion in FX Pairs with Reinforcement Learning
+ ## Strategy Lab #2 — Mean Reversion in FX Pairs with Reinforcement Learning
 =========================================================================
 Algorithmic Token · ENTER Invest
 
@@ -27,7 +26,7 @@ of this file and in the accompanying Strategy Lab #2 article at
 Algorithmic Token: https://algorithmictoken.substack.com
 
 Dependencies: numpy, pandas, yfinance, statsmodels
-"""
+
 
 import numpy as np
 import pandas as pd
