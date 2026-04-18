@@ -4,6 +4,183 @@
  ## Strategy Lab #2 — Mean Reversion in FX Pairs with Reinforcement Learning
 =========================================================================
 Algorithmic Token · ENTER Invest
+# Strategy Lab #2 — Mean Reversion in FX Pairs with Reinforcement Learning
+
+**Algorithmic Token · ENTER Invest**
+
+> **Primary academic source:**
+> Ning, B. & Lee, K. (2024) — *Advanced Statistical Arbitrage with Reinforcement Learning*
+> Department of Statistics, Purdue University
+> [arXiv:2403.12180](https://arxiv.org/abs/2403.12180) · q-fin.ST · March 2024
+
+Experimental Python prototype accompanying the Strategy Lab #2 article published at [Algorithmic Token on Substack](https://algorithmictoken.substack.com/p/strategy-lab-2-mean-reversion-in).
+
+---
+
+## What This Is
+
+This module implements a three-phase FX pairs trading framework combining classical cointegration-based spread construction with a Q-learning reinforcement learning agent for dynamic entry and exit decisions.
+
+**Primary reference:**
+
+> Ning, B. & Lee, K. (2024) — *Advanced Statistical Arbitrage with Reinforcement Learning*
+> Department of Statistics, Purdue University · [arXiv:2403.12180](https://arxiv.org/abs/2403.12180)
+
+**Classical baseline references:**
+
+> Gatev, Goetzmann & Rouwenhorst (2006) — *Pairs Trading: Performance of a Relative-Value Arbitrage Rule* — Review of Financial Studies
+
+> Leung & Li (2016) — *Optimal Mean Reversion Trading: Mathematical Analysis and Practical Applications* — World Scientific
+
+The paper's two key innovations over classical pairs trading are replicated here:
+
+1. **Empirical Mean Reversion Time (EMRT)** — a model-free hedge ratio optimisation that selects the spread with the fastest empirical mean reversion, replacing the OU maximum-likelihood estimator.
+2. **Q-learning RL agent** — replaces fixed z-score entry/exit thresholds with a dynamic agent pre-trained on simulated OU paths and deployed on real FX data.
+
+This is a **prototype-grade implementation**, not production-ready trading infrastructure. See the article for full strategy rationale, failure modes, and backtest assumptions.
+
+---
+
+## Repository Structure
+
+```
+strategy_lab_02/
+├── strategy_lab_02.py   — full implementation
+└── README.md            — this file
+```
+
+---
+
+## Installation
+
+```bash
+pip install numpy pandas yfinance statsmodels
+```
+
+---
+
+## Quick Start
+
+```python
+from strategy_lab_02 import run_fx_pairs_backtest
+
+results = run_fx_pairs_backtest(
+    ticker1         = "AUDUSD=X",
+    ticker2         = "NZDUSD=X",
+    formation_start = "2022-01-01",
+    formation_end   = "2022-12-31",
+    trading_start   = "2023-01-01",
+    trading_end     = "2023-12-31",
+    cost_bps        = 5.0,
+)
+
+print(results["performance"])
+```
+
+Or run directly from the command line for a demo:
+
+```bash
+python strategy_lab_02.py
+```
+
+---
+
+## Architecture
+
+### Phase 1 — Pair Identification (`test_cointegration`)
+
+Tests two FX price series for cointegration using the Engle-Granger method. Returns the cointegration p-value, hedge ratio (beta), spread series, and **half-life of mean reversion** estimated via AR(1) regression.
+
+**Half-life filter:** only proceed with pairs whose half-life falls between 5 and 60 trading days. Below 5 days the signal likely reflects microstructure noise; above 60 days the capital efficiency is poor.
+
+### Phase 2 — Spread Construction (`find_optimal_hedge_ratio`)
+
+Grid-searches hedge ratios in `[beta_min, beta_max]` and selects the beta that minimises the **Empirical Mean Reversion Time (EMRT)** of the resulting spread, subject to a variance cap.
+
+EMRT is computed in `compute_emrt()` following Definition 3.1 of Ning & Lee (2024): the average time from a significant local extreme to the next mean crossing.
+
+### Phase 3a — Classical Baseline (`classical_zscore_strategy`)
+
+Fixed z-score threshold rule calibrated on the formation period. Long when z < -entry_threshold, short when z > +entry_threshold, flat when z returns to ±exit_threshold. Includes explicit transaction cost deduction.
+
+### Phase 3b — RL Agent (`MeanReversionRLAgent`)
+
+Tabular Q-learning agent. State encodes the last `lookback` spread return directions as a base-4 integer (4^lookback total states). Action space: {sell/close, hold, buy/open}. Reward: `action * (theta - spread) - cost * |action|`.
+
+**Critical:** call `train_on_simulated_paths()` before `trade()`. The Q-table requires 1,000–2,000 simulated OU episodes to converge — real FX data alone provides insufficient training volume.
+
+---
+
+## Key Parameters
+
+| Parameter | Default | Description |
+|---|---|---|
+| `ticker1 / ticker2` | `AUDUSD=X / NZDUSD=X` | Yahoo Finance FX tickers |
+| `cost_bps` | `5.0` | Round-trip transaction cost (bps) |
+| `entry_threshold` | `2.0` | Z-score entry level |
+| `exit_threshold` | `0.5` | Z-score exit level |
+| `rl_n_paths` | `2000` | RL pre-training simulation paths |
+| `lookback` | `4` | RL state window (256 total states) |
+| `k` | `0.03` | Return threshold for state encoding |
+
+---
+
+## Suggested FX Pair Candidates
+
+| Pair | Tickers | Economic rationale |
+|---|---|---|
+| AUD/USD — NZD/USD | `AUDUSD=X`, `NZDUSD=X` | Commodity-linked; correlated China exposure |
+| EUR/USD — GBP/USD | `EURUSD=X`, `GBPUSD=X` | European currencies; shared risk dynamics |
+| USD/CAD — USD/NOK | `USDCAD=X`, `USDNOK=X` | Petrocurrencies; oil price driven |
+
+Always verify cointegration on your specific formation period before trading any pair. Cointegration relationships are not static.
+
+---
+
+## Known Limitations
+
+- **Long-only RL agent** — the current implementation does not enter short spread positions (only long). Short selling extension is planned.
+- **Daily frequency only** — the backtest runs on daily close prices. Intraday extension requires a paid data vendor and explicit market impact modelling.
+- **Fixed OU simulation parameters** — `mu`, `theta`, and `sigma` in `train_on_simulated_paths()` are hardcoded defaults. For best results, calibrate these to the formation-period spread dynamics before training.
+- **Carry costs not modelled** — overnight FX swap rates are not included in the cost model. For multi-week holding periods on rate-differential pairs, this can materially affect net P&L.
+- **No walk-forward validation** — the backtest uses a single formation/trading split. Walk-forward validation across multiple periods is essential before drawing conclusions about strategy robustness.
+
+---
+
+## Planned Extensions
+
+- [ ] Short spread positions for the RL agent
+- [ ] Walk-forward validation framework
+- [ ] Adaptive OU parameter calibration for RL pre-training
+- [ ] Carry cost model for FX overnight positions
+- [ ] Multi-pair portfolio with cross-pair correlation management
+- [ ] Integration with ENTER Invest backtesting engine (Phase 1)
+
+---
+
+## Relationship to Strategy Lab #1
+
+This module extends the Strategy Lab #1 framework (`strategy_lab_01/`) with a new asset class (FX), a new signal type (mean reversion vs momentum), and a new execution logic layer (RL agent vs proportional controller). The data layer (`yfinance`), performance analytics, and cost modelling conventions are consistent across both Strategy Labs.
+
+---
+
+## Further Resources
+
+- [arXiv:2403.12180](https://arxiv.org/abs/2403.12180) — Ning & Lee (2024), primary reference
+- [arXiv:2106.04028](https://arxiv.org/abs/2106.04028) — *Deep Learning Statistical Arbitrage* — next logical step
+- [statsmodels cointegration docs](https://www.statsmodels.org/stable/generated/statsmodels.tsa.stattools.coint.html)
+- [RobotWealth — Mean Reversion and Cointegration](https://robotwealth.com/exploring-mean-reversion-and-cointegration-part-2/)
+- [Ernie Chan — Algorithmic Trading](https://www.amazon.com/Algorithmic-Trading-Winning-Strategies-Rationale/dp/1118460146)
+
+---
+
+## Risk Disclosure
+
+This code is experimental and provided for educational and research purposes only. Past performance of any modelled strategy is not indicative of future results. All algorithmic trading carries significant financial risk, including the potential total loss of capital. Nothing here constitutes financial advice. ENTER Invest does not manage client funds based on strategies described here unless explicitly contracted to do so.
+
+---
+
+*Algorithmic Token is published by ENTER Invest. [algorithmictoken.substack.com](https://algorithmictoken.substack.com)*
 
 Implements a three-phase FX pairs trading framework:
     Phase 1 — Pair identification via cointegration testing
